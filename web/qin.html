@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QIN — web</title>
+<style>
+  :root{
+    --tan:#e7d7ad; --water:#3a526b; --line:#b9a877;
+    --R:#c0392b; --Y:#d4ac0d; --B:#2e6da4;
+    --p0:#2e8b57; --p1:#8e44ad; --p2:#e07b1c; --p3:#cfd3d6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#2b2622;color:#eee;}
+  header{padding:10px 16px;background:#1f1b18;display:flex;gap:14px;align-items:center;flex-wrap:wrap;border-bottom:2px solid #000}
+  h1{font-size:20px;margin:0;color:#e8c87a;letter-spacing:3px}
+  .wrap{display:flex;gap:16px;padding:16px;align-items:flex-start;flex-wrap:wrap}
+  label{font-size:13px;color:#cdc4b6}
+  select,button,input{font:inherit;padding:6px 10px;border-radius:6px;border:1px solid #555;background:#33302c;color:#eee;cursor:pointer}
+  button.primary{background:#6b4f1d;border-color:#a07a2a}
+  #boardWrap{position:relative;background:#1c1814;padding:10px;border-radius:10px;border:1px solid #000}
+  #board{display:grid;gap:2px;background:#7d6a3e}
+  .cell{width:48px;height:48px;position:relative;display:flex;align-items:center;justify-content:center;user-select:none}
+  .water{background:var(--water)}
+  .grass{background:var(--tan);box-shadow:inset 0 0 0 1px var(--line)}
+  .grass.cand{cursor:pointer;outline:3px solid #ffd34d;outline-offset:-3px}
+  .grass.cand:hover{background:#f1e6bf}
+  .prov.R{background:#e7a79f} .prov.Y{background:#ecd98a} .prov.B{background:#9bbdda}
+  .vil{background:#dec99a;box-shadow:inset 0 0 0 2px #4a3c1e}
+  .pag{width:18px;height:18px;border-radius:50%;border:2px solid rgba(0,0,0,.55);position:absolute}
+  .pag.double{box-shadow:0 0 0 3px rgba(255,255,255,.55)}
+  .hut{font-size:20px;line-height:1;color:#5a4a24}
+  .ownerline{position:absolute;inset:0;pointer-events:none}
+  .panel{min-width:240px;max-width:340px;background:#211d19;border:1px solid #000;border-radius:10px;padding:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600}
+  .hand{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .tile{display:flex;border:2px solid #222;border-radius:6px;overflow:hidden;cursor:pointer}
+  .tile.sel{outline:3px solid #ffd34d}
+  .half{width:30px;height:44px}
+  .half.R{background:var(--R)} .half.Y{background:var(--Y)} .half.B{background:var(--B)}
+  #log{height:220px;overflow:auto;font-size:12px;line-height:1.5;background:#15120f;border-radius:6px;padding:8px;margin-top:8px}
+  #log div{border-bottom:1px solid #221;padding:1px 0}
+  .menu{position:absolute;background:#15120f;border:1px solid #a07a2a;border-radius:6px;padding:6px;z-index:5;display:flex;flex-direction:column;gap:4px}
+  .menu button{font-size:12px;padding:4px 8px;text-align:left}
+  .banner{font-size:16px;font-weight:700;color:#ffd34d;margin-top:8px;min-height:20px}
+  .legend{font-size:11px;color:#b3a89a;margin-top:8px;line-height:1.6}
+  .swatch{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin:0 2px}
+</style>
+</head>
+<body>
+<header>
+  <h1>QIN</h1>
+  <label>Board
+    <select id="boardSel">
+      <option value="bird">Bird (from photo*)</option>
+      <option value="prov">Provisional</option>
+    </select>
+  </label>
+  <label>Opponent
+    <select id="modeSel">
+      <option value="greedy">vs bot (greedy — strongest)</option>
+      <option value="mcts">vs MCTS bot (experimental, slow)</option>
+      <option value="hotseat">2 players (hotseat)</option>
+    </select>
+  </label>
+  <label>MCTS iterations
+    <select id="strengthSel">
+      <option value="60">60 (~1.5s/move)</option>
+      <option value="120" selected>120 (~3s/move)</option>
+      <option value="200">200 (~5s/move)</option>
+    </select>
+  </label>
+  <label>Seed <input id="seed" type="number" value="1" style="width:80px"></label>
+  <button class="primary" id="newGame">New game</button>
+</header>
+
+<div class="wrap">
+  <div id="boardWrap">
+    <div id="board"></div>
+    <div id="menu" class="menu" style="display:none"></div>
+  </div>
+
+  <div class="panel">
+    <div id="turn"></div>
+    <div id="supplies" style="margin-top:8px;font-size:13px"></div>
+    <div class="banner" id="banner"></div>
+    <div style="margin-top:10px;font-weight:600">Hand</div>
+    <div class="hand" id="hand"></div>
+    <div style="margin-top:6px;font-size:12px;color:#b3a89a" id="hint"></div>
+    <div style="margin-top:10px;font-weight:600">Events</div>
+    <div id="log"></div>
+    <div class="legend">
+      Province colour = tile colour
+      (<span class="swatch" style="background:var(--R)"></span>R
+       <span class="swatch" style="background:var(--Y)"></span>Y
+       <span class="swatch" style="background:var(--B)"></span>B).
+      Pagoda ring colour = owner. Glowing ring = major (double pagoda).<br>
+      Note: the greedy bot is the strongest opponent here — self-play shows it
+      beats MCTS at interactive budgets (QIN rewards racing to place pagodas).
+      The MCTS bot is experimental and slower.
+    </div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+const BOARDS = {
+  // 12x12, central B/Y/R provinces in column 5 (rows 4/6/8). Transcribed from
+  // a straight-down photo (grid pitch measured, every village cell verified).
+  // Kept in sync with qin/layouts.py BIRD_MAP.
+  bird: [
+    "....oo.....o",
+    "............",
+    "............",
+    ".o......o...",
+    ".....B......",
+    "............",
+    ".....Y......",
+    ".o.......oo.",
+    ".o...R......",
+    "............",
+    "............",
+    "......oo...o",
+  ].join("\n"),
+  prov: [
+    "...........",
+    ".o.......o.",
+    "...........",
+    "....o......",
+    ".....RYB...",
+    "...........",
+    "......o....",
+    "...........",
+    ".o.......o.",
+    "...........",
+    "...........",
+  ].join("\n"),
+};
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const PCOL = ["--p0", "--p1", "--p2", "--p3"].map(css);
+const PNAME = ["Green", "Purple", "Orange", "White"];
+
+let state, selectedTile = null, botPlayers = new Set(), botKind = "greedy";
+
+function newGame() {
+  const map = BOARDS[document.getElementById("boardSel").value];
+  const mode = document.getElementById("modeSel").value;
+  const seed = parseInt(document.getElementById("seed").value) || 1;
+  state = new QIN.State(QIN.Board.fromAscii(map), 2, seed);
+  botKind = mode;
+  botPlayers = (mode === "greedy" || mode === "mcts") ? new Set([1]) : new Set();
+  selectedTile = null;
+  document.getElementById("log").innerHTML = "";
+  document.getElementById("banner").textContent = "";
+  render();
+  maybeBot();
+}
+
+function cellToProv() {
+  const m = new Map();
+  for (const p of state.provinces) for (const c of p.cells) m.set(c, p);
+  return m;
+}
+function provReps() {
+  const reps = new Map();
+  for (const p of state.provinces) reps.set(Math.min(...p.cells), p);
+  return reps;
+}
+
+function render() {
+  const B = state.board, board = document.getElementById("board");
+  board.style.gridTemplateColumns = `repeat(${B.cols},48px)`;
+  board.innerHTML = "";
+  const c2p = cellToProv(), reps = provReps();
+  const cand = new Set();
+  if (selectedTile && !state.gameOver && !botPlayers.has(state.currentPlayer)) {
+    for (const m of legalForTile(selectedTile)) { cand.add(m.a); cand.add(m.b); }
+  }
+  for (let i = 0; i < B.terrain.length; i++) {
+    const d = document.createElement("div"); d.className = "cell";
+    const t = B.terrain[i];
+    if (t === QIN.WATER) d.classList.add("water");
+    else if (t === QIN.GRASS) {
+      d.classList.add("grass");
+      if (cand.has(i)) { d.classList.add("cand"); d.onclick = () => onCellClick(i); }
+    } else if (t === QIN.VILLAGE) {
+      d.classList.add("vil");
+      const hut = document.createElement("div"); hut.className = "hut"; hut.textContent = "⌂"; d.appendChild(hut);
+      if (state.villageOwner.has(i)) addPagoda(d, state.villageOwner.get(i), false);
+    } else {
+      d.classList.add("prov", B.color[i]);
+      const p = c2p.get(i);
+      if (p) { const ol = document.createElement("div"); ol.className = "ownerline"; ol.style.boxShadow = `inset 0 0 0 2px ${PCOL[p.owner]}`; d.appendChild(ol); }
+      if (reps.has(i)) { const pr = reps.get(i); addPagoda(d, pr.owner, pr.major); }
+    }
+    board.appendChild(d);
+  }
+  document.getElementById("turn").innerHTML =
+    `Turn: <span class="pill" style="background:${PCOL[state.currentPlayer]};color:#111">${PNAME[state.currentPlayer]} (P${state.currentPlayer})${botPlayers.has(state.currentPlayer) ? " — bot" : ""}</span>`;
+  const onb = state.onBoard();
+  document.getElementById("supplies").innerHTML = [0, 1].map((p) =>
+    `${PNAME[p]}: ${state.allotment - onb[p]} pagodas left`).join(" &nbsp;|&nbsp; ");
+  renderHand();
+  document.getElementById("menu").style.display = "none";
+  if (state.gameOver) {
+    const r = state.result();
+    document.getElementById("banner").textContent =
+      r.winner != null ? `${PNAME[r.winner]} wins!` : `Shared win: ${r.sharedWinners.map((p) => PNAME[p]).join(", ")}`;
+  }
+}
+function addPagoda(el, owner, double) {
+  const g = document.createElement("div"); g.className = "pag" + (double ? " double" : "");
+  g.style.background = PCOL[owner]; el.appendChild(g);
+}
+
+function renderHand() {
+  const h = document.getElementById("hand"); h.innerHTML = "";
+  const human = !botPlayers.has(state.currentPlayer) && !state.gameOver;
+  state.hands[state.currentPlayer].forEach((t) => {
+    const key = QIN.tileKey(t[0], t[1]);
+    const el = document.createElement("div"); el.className = "tile" + (selectedTile === key ? " sel" : "");
+    el.innerHTML = `<div class="half ${t[0]}"></div><div class="half ${t[1]}"></div>`;
+    if (human) el.onclick = () => { selectedTile = selectedTile === key ? null : key; render(); };
+    h.appendChild(el);
+  });
+  document.getElementById("hint").textContent = human
+    ? (selectedTile ? "Click a highlighted cell to place." : "Select a tile from your hand.")
+    : (state.gameOver ? "" : "Bot is thinking…");
+}
+
+function legalForTile(key) {
+  return state.legalMoves(state.currentPlayer).filter((m) => QIN.tileKey(m.ca, m.cb) === key);
+}
+
+function onCellClick(i) {
+  const opts = legalForTile(selectedTile).filter((m) => m.a === i || m.b === i);
+  if (opts.length === 0) return;
+  if (opts.length === 1) { doMove(opts[0]); return; }
+  showMenu(i, opts);
+}
+
+function showMenu(i, opts) {
+  const B = state.board, menu = document.getElementById("menu");
+  menu.innerHTML = "";
+  opts.forEach((m) => {
+    const b = document.createElement("button");
+    const [ar, ac] = B.rc(m.a), [br, bc] = B.rc(m.b);
+    const dir = m.b === m.a + 1 ? "→" : m.b === m.a - 1 ? "←" : m.b === m.a + B.cols ? "↓" : "↑";
+    b.textContent = `${m.ca}@(${ar},${ac}) ${dir} ${m.cb}@(${br},${bc})`;
+    b.onclick = () => doMove(m);
+    menu.appendChild(b);
+  });
+  const cells = document.querySelectorAll("#board .cell");
+  const rect = cells[i].getBoundingClientRect(), wrect = document.getElementById("boardWrap").getBoundingClientRect();
+  menu.style.left = (rect.left - wrect.left + 20) + "px";
+  menu.style.top = (rect.top - wrect.top + 20) + "px";
+  menu.style.display = "flex";
+}
+
+function doMove(m) {
+  const ev = state.apply(m);
+  selectedTile = null;
+  logEvents(ev);
+  render();
+  maybeBot();
+}
+
+function logEvents(ev) {
+  const log = document.getElementById("log");
+  for (const e of ev) { const d = document.createElement("div"); d.textContent = e; log.appendChild(d); }
+  log.scrollTop = log.scrollHeight;
+}
+
+function maybeBot() {
+  if (state.gameOver) return;
+  if (botPlayers.has(state.currentPlayer)) {
+    const strong = botKind === "mcts";
+    document.getElementById("hint").textContent =
+      strong ? "MCTS bot is thinking…" : "Bot is thinking…";
+    setTimeout(() => {
+      let m;
+      if (strong) {
+        const iters = parseInt(document.getElementById("strengthSel").value) || 120;
+        m = QIN.mctsMove(state, iters, Math.random);
+      } else {
+        m = QIN.botMove(state, Math.random);
+      }
+      if (m) logEvents(state.apply(m));
+      render(); maybeBot();
+    }, strong ? 50 : 450);
+  }
+}
+
+document.getElementById("newGame").onclick = newGame;
+newGame();
+</script>
+</body>
+</html>

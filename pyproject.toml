@@ -1,0 +1,16 @@
+[project]
+name = "boardgame-strategy"
+version = "0.1.0"
+description = "Rulebook-to-engine board games with self-learning agents for strategy discovery. First game: QIN (Reiner Knizia, 2012)."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools]
+packages = ["qin"]
