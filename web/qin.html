@@ -25,6 +25,15 @@
   .grass{background:var(--tan);box-shadow:inset 0 0 0 1px var(--line)}
   .grass.cand{cursor:pointer;outline:3px solid #ffd34d;outline-offset:-3px}
   .grass.cand:hover{background:#f1e6bf}
+  /* Anchor half the player tapped, and the translucent colour "ghost" targets
+     showing where the other half can land (visual placement picker). */
+  .grass.anchor-sel{cursor:pointer;outline:3px solid #ffd34d;outline-offset:-3px;
+    background:#cdbe86;box-shadow:inset 0 0 0 3px rgba(255,211,77,.55)}
+  .cell.ghostcell{display:flex;cursor:pointer;padding:0;
+    outline:2px dashed #ffd34d;outline-offset:-2px}
+  .gh{flex:1 1 0;align-self:stretch;opacity:.6;transition:opacity .1s}
+  .gh:hover{opacity:.92}
+  .gh.R{background:var(--R)} .gh.Y{background:var(--Y)} .gh.B{background:var(--B)}
   .prov.R{background:#e7a79f} .prov.Y{background:#ecd98a} .prov.B{background:#9bbdda}
   .vil{background:#dec99a;box-shadow:inset 0 0 0 2px #4a3c1e}
   .pag{width:18px;height:18px;border-radius:50%;border:2px solid rgba(0,0,0,.55);position:absolute}
@@ -77,7 +86,6 @@
 <div class="wrap">
   <div id="boardWrap">
     <div id="board"></div>
-    <div id="menu" class="menu" style="display:none"></div>
   </div>
 
   <div class="panel">
@@ -141,6 +149,8 @@ const PCOL = ["--p0", "--p1", "--p2", "--p3"].map(css);
 const PNAME = ["Green", "Purple", "Orange", "White"];
 
 let state, selectedTile = null, botPlayers = new Set(), botKind = "greedy";
+// anchorCell: the half the player tapped (locked). hoverAnchor: desktop hover preview.
+let anchorCell = null, hoverAnchor = null;
 
 function newGame() {
   const map = BOARDS[document.getElementById("boardSel").value];
@@ -149,7 +159,7 @@ function newGame() {
   state = new QIN.State(QIN.Board.fromAscii(map), 2, seed);
   botKind = mode;
   botPlayers = (mode === "greedy" || mode === "mcts") ? new Set([1]) : new Set();
-  selectedTile = null;
+  selectedTile = null; anchorCell = null; hoverAnchor = null;
   document.getElementById("log").innerHTML = "";
   document.getElementById("banner").textContent = "";
   render();
@@ -172,17 +182,55 @@ function render() {
   board.style.gridTemplateColumns = `repeat(${B.cols},48px)`;
   board.innerHTML = "";
   const c2p = cellToProv(), reps = provReps();
-  const cand = new Set();
-  if (selectedTile && !state.gameOver && !botPlayers.has(state.currentPlayer)) {
-    for (const m of legalForTile(selectedTile)) { cand.add(m.a); cand.add(m.b); }
+  const human = selectedTile && !state.gameOver && !botPlayers.has(state.currentPlayer);
+
+  // Cells that can be the tapped "anchor" half of the selected tile.
+  const candAnchors = new Set();
+  if (human && anchorCell == null) {
+    for (const m of legalForTile(selectedTile)) { candAnchors.add(m.a); candAnchors.add(m.b); }
   }
+
+  // For the active anchor (locked tap, or hovered on desktop), map each legal
+  // partner cell to the orientation(s) that land there + the colour shown.
+  const displayAnchor = human ? (anchorCell != null ? anchorCell : hoverAnchor) : null;
+  const ghosts = new Map(); // partnerCell -> [{move, partnerColor}]
+  if (displayAnchor != null) {
+    for (const m of legalForTile(selectedTile)) {
+      let partner, partnerColor;
+      if (m.a === displayAnchor) { partner = m.b; partnerColor = m.cb; }
+      else if (m.b === displayAnchor) { partner = m.a; partnerColor = m.ca; }
+      else continue;
+      if (!ghosts.has(partner)) ghosts.set(partner, []);
+      ghosts.get(partner).push({ move: m, partnerColor });
+    }
+  }
+
   for (let i = 0; i < B.terrain.length; i++) {
     const d = document.createElement("div"); d.className = "cell";
     const t = B.terrain[i];
     if (t === QIN.WATER) d.classList.add("water");
     else if (t === QIN.GRASS) {
       d.classList.add("grass");
-      if (cand.has(i)) { d.classList.add("cand"); d.onclick = () => onCellClick(i); }
+      if (ghosts.has(i)) {
+        // Translucent colour ghost(s): tap one to place that orientation.
+        d.classList.add("ghostcell");
+        for (const g of ghosts.get(i)) {
+          const gh = document.createElement("div");
+          gh.className = "gh " + g.partnerColor;
+          gh.title = "Place " + g.partnerColor + " here";
+          gh.onclick = (e) => { e.stopPropagation(); doMove(g.move); };
+          d.appendChild(gh);
+        }
+      } else if (anchorCell != null && i === anchorCell) {
+        d.classList.add("anchor-sel");
+        d.onclick = cancelAnchor;
+      } else if (human && anchorCell == null && candAnchors.has(i)) {
+        d.classList.add("cand");
+        d.onclick = () => onCellClick(i);
+        d.onmouseenter = () => { if (hoverAnchor !== i) { hoverAnchor = i; render(); } };
+      } else if (anchorCell != null) {
+        d.onclick = cancelAnchor; // tap empty space to deselect the anchor
+      }
     } else if (t === QIN.VILLAGE) {
       d.classList.add("vil");
       const hut = document.createElement("div"); hut.className = "hut"; hut.textContent = "⌂"; d.appendChild(hut);
@@ -201,7 +249,7 @@ function render() {
   document.getElementById("supplies").innerHTML = [0, 1].map((p) =>
     `${PNAME[p]}: ${state.allotment - onb[p]} pagodas left`).join(" &nbsp;|&nbsp; ");
   renderHand();
-  document.getElementById("menu").style.display = "none";
+  board.onmouseleave = () => { if (anchorCell == null && hoverAnchor != null) { hoverAnchor = null; render(); } };
   if (state.gameOver) {
     const r = state.result();
     document.getElementById("banner").textContent =
@@ -220,11 +268,16 @@ function renderHand() {
     const key = QIN.tileKey(t[0], t[1]);
     const el = document.createElement("div"); el.className = "tile" + (selectedTile === key ? " sel" : "");
     el.innerHTML = `<div class="half ${t[0]}"></div><div class="half ${t[1]}"></div>`;
-    if (human) el.onclick = () => { selectedTile = selectedTile === key ? null : key; render(); };
+    if (human) el.onclick = () => {
+      selectedTile = selectedTile === key ? null : key;
+      anchorCell = null; hoverAnchor = null; render();
+    };
     h.appendChild(el);
   });
   document.getElementById("hint").textContent = human
-    ? (selectedTile ? "Click a highlighted cell to place." : "Select a tile from your hand.")
+    ? (!selectedTile ? "Select a tile from your hand."
+        : anchorCell != null ? "Tap a coloured ghost to place — or tap the gold cell to cancel."
+        : "Tap a glowing cell, then tap a coloured ghost to drop the tile.")
     : (state.gameOver ? "" : "Bot is thinking…");
 }
 
@@ -236,30 +289,16 @@ function onCellClick(i) {
   const opts = legalForTile(selectedTile).filter((m) => m.a === i || m.b === i);
   if (opts.length === 0) return;
   if (opts.length === 1) { doMove(opts[0]); return; }
-  showMenu(i, opts);
+  // Multiple orientations: lock this cell as the anchor and show colour ghosts
+  // on the board for the other half — tap one to place.
+  anchorCell = i; hoverAnchor = null; render();
 }
 
-function showMenu(i, opts) {
-  const B = state.board, menu = document.getElementById("menu");
-  menu.innerHTML = "";
-  opts.forEach((m) => {
-    const b = document.createElement("button");
-    const [ar, ac] = B.rc(m.a), [br, bc] = B.rc(m.b);
-    const dir = m.b === m.a + 1 ? "→" : m.b === m.a - 1 ? "←" : m.b === m.a + B.cols ? "↓" : "↑";
-    b.textContent = `${m.ca}@(${ar},${ac}) ${dir} ${m.cb}@(${br},${bc})`;
-    b.onclick = () => doMove(m);
-    menu.appendChild(b);
-  });
-  const cells = document.querySelectorAll("#board .cell");
-  const rect = cells[i].getBoundingClientRect(), wrect = document.getElementById("boardWrap").getBoundingClientRect();
-  menu.style.left = (rect.left - wrect.left + 20) + "px";
-  menu.style.top = (rect.top - wrect.top + 20) + "px";
-  menu.style.display = "flex";
-}
+function cancelAnchor() { anchorCell = null; hoverAnchor = null; render(); }
 
 function doMove(m) {
   const ev = state.apply(m);
-  selectedTile = null;
+  selectedTile = null; anchorCell = null; hoverAnchor = null;
   logEvents(ev);
   render();
   maybeBot();
